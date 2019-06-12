@@ -1,0 +1,24 @@
+{
+	"trex-boxes": [
+		{
+			"client": {
+				"devname": "enp0s9",
+				"devipv4": [ "10.0.0.10", "32" ]
+			},
+			"server": {
+				"devname": "enp0s10",
+				"devipv4": [ "20.0.0.10", "32" ]
+			}
+		},
+		{
+			"client": {
+				"devname": "enp0s8",
+				"devipv4": [ "30.0.0.10", "32" ]
+			},
+			"server": {
+				"devname": "enp0s3",
+				"devipv4": [ "40.0.0.10", "32" ]
+			}
+		}
+	]
+}
