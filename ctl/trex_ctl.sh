@@ -5,18 +5,9 @@ ACTION=$1
 TREX_BOX_INST=$(hostname)
 
 ROOTDIR=$PWD
-CTL_DIR='/opt/trex/ctl'
 CFG_DIR='/opt/trex/cfg'
-TREX_BOX_CFG_CMD="$CFG_DIR/${TREX_BOX_INST}-cfg.sh"
-TREX_CTL_CMD="$CTL_DIR/trex_ctl.sh"
 JSON_CFG_FILE="$CFG_DIR/cfg.json"
 YAML_CFG_FILE="$CFG_DIR/${TREX_BOX_INST}-cfg.yaml"
-
-trex_config() {
-
-	pkill rex
-	$CTL_DIR/trex_config.sh
-}
 
 trex_show_status() {
 
@@ -62,13 +53,10 @@ trex_stop() {
 	trex_dev_bind server
 }
 
-if [[ $ACTION == 'config' ]]
-then
-	trex_config
-	exit
-elif [[ $ACTION == 'show_status' ]]
+if [[ $ACTION == 'show_status' ]]
 then
 	trex_show_status
+	exit
 fi
 
 JSON_CFG=$(jq -r '.' $JSON_CFG_FILE)

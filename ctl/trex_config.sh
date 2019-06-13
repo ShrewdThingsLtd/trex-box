@@ -1,6 +1,7 @@
 #!/bin/bash
 #MAINTAINER erez@shrewdthings.com
 
+ACTION=$1
 TREX_BOX_INST=$(hostname)
 
 ROOTDIR=$PWD
@@ -18,12 +19,19 @@ else
 	JSON_CFG=$(jq -r '.' $JSON_CFG_FILE)
 fi
 
-get_dev_env() {
+get_dev_name() {
 
 	local DEV_OBJ="$1"
 	
 	local JQ_EXPR=$(printf '%s.devname' "$DEV_OBJ")
 	DEV_NAME=$(jq -r "$JQ_EXPR" <<< $JSON_CFG)
+}
+
+get_dev_env() {
+
+	local DEV_OBJ="$1"
+
+	get_dev_name "$DEV_OBJ"
 	DEV_DRIVER=$(ethtool -i $DEV_NAME | sed -n 's~^driver\:\s\s*\(..*\)$~\1~p')
 	DEV_PCI=$(ethtool -i $DEV_NAME | sed -n 's~^bus-info\:\s\s*\(..*\)$~\1~p')
 	DEV_MAC=$(ip -o link show dev $DEV_NAME | awk '{print $(NF-2)}')
@@ -60,16 +68,21 @@ update_dev_cfg() {
 	update_dev_json_cfg "$JQ_EXPR"
 	if [[ $DEV_TYPE == 'client' ]]
 	then
-		DEV_NAME_CLIENT=$DEV_NAME
 		update_dev_yaml_cfg 0 1
 	elif [[ $DEV_TYPE == 'server' ]]
 	then
-		DEV_NAME_SERVER=$DEV_NAME
 		update_dev_yaml_cfg 1 0
 	fi
 }
 
 write_cfg_cmd() {
+
+local JQ_EXPR=$(printf '."trex-boxes"[%u].client' "$TREX_BOX_ID")
+get_dev_name "$JQ_EXPR"
+local DEV_NAME_CLIENT=$DEV_NAME
+local JQ_EXPR=$(printf '."trex-boxes"[%u].server' "$TREX_BOX_ID")
+get_dev_name "$JQ_EXPR"
+local DEV_NAME_SERVER=$DEV_NAME
 
 cat > $TREX_BOX_CFG_CMD <<EOF
 #!/bin/bash
@@ -100,8 +113,13 @@ rebuild_pmd() {
 	cd $ROOTDIR
 }
 
+if [[ $ACTION == 'preconfig' ]]
+then
+	rebuild_pmd
+	write_cfg_cmd
+	exit
+fi
+
 update_dev_cfg client
 update_dev_cfg server
-write_cfg_cmd
-rebuild_pmd
 cat <<< "$(jq -r '.' <<< $JSON_CFG)" > $JSON_CFG_FILE

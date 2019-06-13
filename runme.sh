@@ -9,6 +9,7 @@ TREX_BOX_WORKDIR='/opt/trex/v2.56'
 TREX_BOX_IMG='trex-box-img'
 TREX_BOX_INST="trex-box${TREX_BOX_ID}"
 TREX_BOX_CFG_CMD="$CFG_DIR/${TREX_BOX_INST}-cfg.sh"
+TREX_CONFIG_CMD="/opt/trex/ctl/trex_config.sh"
 TREX_CTL_CMD="/opt/trex/ctl/trex_ctl.sh"
 
 docker_cleanup() {
@@ -23,8 +24,6 @@ docker_cleanup() {
 
 docker_run_inst() {
 
-	local CMD=$1
-	
 	docker run \
 		--hostname=$TREX_BOX_INST \
 		--name=$TREX_BOX_INST \
@@ -39,13 +38,13 @@ docker_run_inst() {
 		-v /lib/modules:/lib/modules \
 		-v $ROOTDIR/ko/$(uname -r):$TREX_BOX_WORKDIR/ko/$(uname -r) \
 		-v $CFG_DIR:/opt/trex/cfg \
-		$TREX_BOX_IMG $CMD
+		$TREX_BOX_IMG "$@"
 	sleep 1
 }
 
 docker_exec_inst() {
 
-	docker exec $TREX_BOX_INST /bin/bash -c "$@"
+	docker exec $TREX_BOX_INST "$@"
 }
 
 show_status() {
@@ -81,13 +80,18 @@ docker_kill() {
 	docker_cleanup
 }
 
+docker_assign_ns() {
+
+	local TREX_BOX_INST_PID="$(docker inspect -f '{{.State.Pid}}' $TREX_BOX_INST)"
+	mkdir -p /var/run/netns
+	ln -sf /proc/$TREX_BOX_INST_PID/ns/net "/var/run/netns/$TREX_BOX_INST"
+}
+
 docker_run() {
 
 	docker_run_inst
 	docker_exec_inst $TREX_CTL_CMD stop
-	local TREX_BOX_INST_PID="$(docker inspect -f '{{.State.Pid}}' $TREX_BOX_INST)"
-	mkdir -p /var/run/netns
-	ln -sf /proc/$TREX_BOX_INST_PID/ns/net "/var/run/netns/$TREX_BOX_INST"
+	docker_assign_ns
 	$TREX_BOX_CFG_CMD attach_devs
 	docker_exec_inst $TREX_CTL_CMD restart
 	show_status
@@ -97,7 +101,13 @@ docker_config() {
 
 	docker build -t $TREX_BOX_IMG ./
 	docker_cleanup
-	docker_run_inst $TREX_CTL_CMD config
+	docker_run_inst /bin/bash
+	docker_exec_inst $TREX_CONFIG_CMD preconfig
+	docker_assign_ns
+	$TREX_BOX_CFG_CMD attach_devs
+	docker_exec_inst $TREX_CONFIG_CMD
+	$TREX_BOX_CFG_CMD detach_devs
+	docker kill $TREX_BOX_INST
 	if [[ "mod_$(lsmod | grep -o '^igb_uio')" == 'mod_igb_uio' ]]
 	then
 		modprobe uio
