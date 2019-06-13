@@ -1,17 +1,19 @@
 #!/bin/bash
 #MAINTAINER erez@shrewdthings.com
 
+TREX_BOX_INST=$(hostname)
+
 ROOTDIR=$PWD
+CTL_DIR='/opt/trex/ctl'
 CFG_DIR='/opt/trex/cfg'
-TREX_BOX_INST="$(hostname)"
+TREX_BOX_CFG_CMD="$CFG_DIR/${TREX_BOX_INST}-cfg.sh"
 JSON_CFG_FILE="$CFG_DIR/cfg.json"
 YAML_CFG_FILE="$CFG_DIR/${TREX_BOX_INST}-cfg.yaml"
-cp -f /opt/trex/start/cfg.yaml $YAML_CFG_FILE
-CFG_CMD="$CFG_DIR/${TREX_BOX_INST}-cfg.sh"
+cp -f $CTL_DIR/cfg.yaml $YAML_CFG_FILE
 
 if [ ! -f $JSON_CFG_FILE ]
 then
-	JSON_CFG=$(jq -r '.' /opt/trex/start/cfg.json)
+	JSON_CFG=$(jq -r '.' $CTL_DIR/cfg.json)
 else
 	JSON_CFG=$(jq -r '.' $JSON_CFG_FILE)
 fi
@@ -69,7 +71,7 @@ update_dev_cfg() {
 
 write_cfg_cmd() {
 
-cat > $CFG_CMD <<EOF
+cat > $TREX_BOX_CFG_CMD <<EOF
 #!/bin/bash
 ACTION=\$1
 if [[ \$ACTION == 'detach_devs' ]]
@@ -86,7 +88,7 @@ ip link set dev $DEV_NAME_SERVER netns $TREX_BOX_INST
 ip netns exec $TREX_BOX_INST ip link set dev $DEV_NAME_SERVER up
 fi
 EOF
-chmod +x $CFG_CMD
+chmod +x $TREX_BOX_CFG_CMD
 }
 
 rebuild_pmd() {

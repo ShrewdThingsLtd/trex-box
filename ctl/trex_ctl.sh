@@ -18,6 +18,16 @@ trex_config() {
 	$CTL_DIR/trex_config.sh
 }
 
+trex_show_status() {
+
+	echo
+	echo "$TREX_BOX_INST devices:"
+	echo '-------------'
+	cd $ROOTDIR
+	./dpdk_nic_bind.py -s
+	echo
+}
+
 trex_dev_bind() {
 
 	local DEV_TYPE=$1
@@ -52,20 +62,13 @@ trex_stop() {
 	trex_dev_bind server
 }
 
-trex_show_status() {
-
-	echo
-	echo "$TREX_BOX_INST devices:"
-	echo '-------------'
-	cd $ROOTDIR
-	./dpdk_nic_bind.py -s
-	echo
-}
-
 if [[ $ACTION == 'config' ]]
 then
 	trex_config
 	exit
+elif [[ $ACTION == 'show_status' ]]
+then
+	trex_show_status
 fi
 
 JSON_CFG=$(jq -r '.' $JSON_CFG_FILE)
@@ -76,7 +79,4 @@ then
 elif [[ $ACTION == 'stop' ]]
 then
 	trex_stop
-elif [[ $ACTION == 'show_status' ]]
-then
-	trex_show_status
 fi

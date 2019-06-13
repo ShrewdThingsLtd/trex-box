@@ -141,20 +141,3 @@ elif [[ $ACTION == 'kill' ]]
 then
 	docker_kill
 fi
-
-docker_reset
-
-if [[ $ACTION == 'stop' ]]
-then
-	exit
-fi
-
-docker build -t $TREX_BOX_IMG ./
-docker_cleanup
-
-if [[ $ACTION == 'build' ]]
-then
-	exit
-fi
-
-docker_start
