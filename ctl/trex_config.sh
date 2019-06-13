@@ -1,0 +1,105 @@
+#!/bin/bash
+#MAINTAINER erez@shrewdthings.com
+
+ROOTDIR=$PWD
+CFG_DIR='/opt/trex/cfg'
+TREX_BOX_INST="$(hostname)"
+JSON_CFG_FILE="$CFG_DIR/cfg.json"
+YAML_CFG_FILE="$CFG_DIR/${TREX_BOX_INST}-cfg.yaml"
+cp -f /opt/trex/start/cfg.yaml $YAML_CFG_FILE
+CFG_CMD="$CFG_DIR/${TREX_BOX_INST}-cfg.sh"
+
+if [ ! -f $JSON_CFG_FILE ]
+then
+	JSON_CFG=$(jq -r '.' /opt/trex/start/cfg.json)
+else
+	JSON_CFG=$(jq -r '.' $JSON_CFG_FILE)
+fi
+
+get_dev_env() {
+
+	local DEV_OBJ="$1"
+	
+	local JQ_EXPR=$(printf '%s.devname' "$DEV_OBJ")
+	DEV_NAME=$(jq -r "$JQ_EXPR" <<< $JSON_CFG)
+	DEV_DRIVER=$(ethtool -i $DEV_NAME | sed -n 's~^driver\:\s\s*\(..*\)$~\1~p')
+	DEV_PCI=$(ethtool -i $DEV_NAME | sed -n 's~^bus-info\:\s\s*\(..*\)$~\1~p')
+	DEV_MAC=$(ip -o link show dev $DEV_NAME | awk '{print $(NF-2)}')
+}
+
+update_dev_json_cfg() {
+
+	local DEV_OBJ="$1"
+	
+	JQ_EXPR=$(printf '%s.devdriver |= "%s"' "$DEV_OBJ" "$DEV_DRIVER")
+	JSON_CFG=$(jq "$JQ_EXPR" <<< $JSON_CFG)
+	JQ_EXPR=$(printf '%s.devpci |= "%s"' "$DEV_OBJ" "$DEV_PCI")
+	JSON_CFG=$(jq "$JQ_EXPR" <<< $JSON_CFG)
+	JQ_EXPR=$(printf '%s.devmac |= "%s"' "$DEV_OBJ" "$DEV_MAC")
+	JSON_CFG=$(jq "$JQ_EXPR" <<< $JSON_CFG)
+}
+
+update_dev_yaml_cfg() {
+
+	local DEV_IDX=$1
+	local PEER_IDX=$2
+	
+	yq w -i $YAML_CFG_FILE [0].interfaces[$DEV_IDX] $DEV_PCI
+	yq w -i $YAML_CFG_FILE [0].port_info[$DEV_IDX].src_mac $DEV_MAC
+	yq w -i $YAML_CFG_FILE [0].port_info[$PEER_IDX].dest_mac $DEV_MAC
+}
+
+update_dev_cfg() {
+
+	local DEV_TYPE="$1"
+	
+	local JQ_EXPR=$(printf '."trex-boxes"[%u].%s' "$TREX_BOX_ID" "$DEV_TYPE")
+	get_dev_env "$JQ_EXPR"
+	update_dev_json_cfg "$JQ_EXPR"
+	if [[ $DEV_TYPE == 'client' ]]
+	then
+		DEV_NAME_CLIENT=$DEV_NAME
+		update_dev_yaml_cfg 0 1
+	elif [[ $DEV_TYPE == 'server' ]]
+	then
+		DEV_NAME_SERVER=$DEV_NAME
+		update_dev_yaml_cfg 1 0
+	fi
+}
+
+write_cfg_cmd() {
+
+cat > $CFG_CMD <<EOF
+#!/bin/bash
+ACTION=\$1
+if [[ \$ACTION == 'detach_devs' ]]
+then
+ip netns exec $TREX_BOX_INST ip link set dev $DEV_NAME_CLIENT netns 1
+ip link set dev $DEV_NAME_CLIENT up
+ip netns exec $TREX_BOX_INST ip link set dev $DEV_NAME_SERVER netns 1
+ip link set dev $DEV_NAME_SERVER up
+elif [[ \$ACTION == 'attach_devs' ]]
+then
+ip link set dev $DEV_NAME_CLIENT netns $TREX_BOX_INST
+ip netns exec $TREX_BOX_INST ip link set dev $DEV_NAME_CLIENT up
+ip link set dev $DEV_NAME_SERVER netns $TREX_BOX_INST
+ip netns exec $TREX_BOX_INST ip link set dev $DEV_NAME_SERVER up
+fi
+EOF
+chmod +x $CFG_CMD
+}
+
+rebuild_pmd() {
+
+	cd $ROOTDIR/ko/src
+	make clean
+	make
+	make install
+	cd $ROOTDIR
+}
+
+update_dev_cfg client
+update_dev_cfg server
+write_cfg_cmd
+rebuild_pmd
+cat <<< "$(jq -r '.' <<< $JSON_CFG)" > $JSON_CFG_FILE

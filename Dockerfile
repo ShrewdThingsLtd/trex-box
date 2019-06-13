@@ -7,14 +7,14 @@ RUN apt-get -y update && apt-get -y install wget pciutils iproute2 build-essenti
 WORKDIR /opt/trex
 RUN TREX_WEB_URL='http://trex-tgn.cisco.com/trex' && wget --no-cache ${TREX_WEB_URL}/release/$TREX_VER.tar.gz && tar -xzvf ./$TREX_VER.tar.gz
 WORKDIR /opt/trex/$TREX_VER
-COPY ./start /opt/trex/start
+COPY ./ctl /opt/trex/ctl
 
 #######################################
 ########### TRex Service ##############
 RUN mkdir -p /etc/service/trexd/log
 RUN printf '#!/bin/sh\n\
 exec 2>&1\n\
-exec setsid /opt/trex/start/trex_start.sh\n\
+exec setsid /opt/trex/ctl/trex_ctl.sh restart\n\
 ' > /etc/service/trexd/run
 RUN printf '#!/bin/sh\n\
 exec chpst -ulog svlogd -tt /tmp\n\

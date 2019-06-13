@@ -1,27 +1,15 @@
 #!/bin/bash
 
-TREX_BOX_ID=${1:-0}
-ACTION=${2:-'start'}
+ACTION=$1
+TREX_BOX_ID=$2
+
 ROOTDIR=$PWD
-CFG_DIR=$ROOTDIR/start
-source $CFG_DIR/trex_env.sh
-JSON_CFG=$(jq -r '.' $JSON_CFG_FILE)
+CFG_DIR=$ROOTDIR/cfg
 TREX_BOX_WORKDIR='/opt/trex/v2.56'
 TREX_BOX_IMG='trex-box-img'
 TREX_BOX_INST="trex-box${TREX_BOX_ID}"
-
-show_devices() {
-
-	echo
-	echo 'Host devices:'
-	echo '-------------'
-	ip addr
-	echo
-	echo "$TREX_BOX_INST devices:"
-	echo '-------------'
-	docker exec $TREX_BOX_INST ./dpdk_nic_bind.py -s
-	echo
-}
+TREX_BOX_CFG_CMD="$CFG_DIR/${TREX_BOX_INST}-cfg.sh"
+TREX_CTL_CMD="/opt/trex/ctl/trex_ctl.sh"
 
 docker_cleanup() {
 
@@ -33,36 +21,14 @@ docker_cleanup() {
 	sleep 1
 }
 
-docker_detach_dev() {
+docker_run_inst() {
 
-	local DEV_OBJ="$1"
+	local CMD=$1
 	
-	local JQ_EXPR=$(printf '%s.devname' "$DEV_OBJ")
-	local DEV_NAME=$(jq -r "$JQ_EXPR" <<< $JSON_CFG)
-	ip netns exec $TREX_BOX_INST ip link set dev $DEV_NAME netns 1
-	ip link set dev $DEV_NAME up
-}
-
-docker_reset() {
-
-	docker exec $TREX_BOX_INST sv stop trexd
-	docker exec $TREX_BOX_INST /opt/trex/start/trex_detach.sh
-	
-	local JQ_EXPR=$(printf '."trex-boxes"[%u].client' "$TREX_BOX_ID")
-	docker_detach_dev "$JQ_EXPR"
-
-	local JQ_EXPR=$(printf '."trex-boxes"[%u].server' "$TREX_BOX_ID")
-	docker_detach_dev "$JQ_EXPR"
-	
-	show_devices $TREX_BOX_INST
-	docker kill $TREX_BOX_INST
-	docker_cleanup
-}
-
-docker_start() {
-
 	docker run \
-		--name $TREX_BOX_INST \
+		--hostname=$TREX_BOX_INST \
+		--name=$TREX_BOX_INST \
+		--env TREX_BOX_ID=$TREX_BOX_ID \
 		-td \
 		--rm \
 		--privileged \
@@ -71,20 +37,110 @@ docker_start() {
 		-v /dev:/dev \
 		-v /usr/src:/usr/src:ro \
 		-v /lib/modules:/lib/modules \
-		-v $ROOTDIR/trex/ko/$(uname -r):$TREX_BOX_WORKDIR/ko/$(uname -r) \
-		-v $ROOTDIR/trex/cfg:/etc/trex/cfg \
-		$TREX_BOX_IMG
-		
+		-v $ROOTDIR/ko/$(uname -r):$TREX_BOX_WORKDIR/ko/$(uname -r) \
+		-v $CFG_DIR:/opt/trex/cfg \
+		$TREX_BOX_IMG $CMD
 	sleep 1
-	docker exec $TREX_BOX_INST sv stop trexd
-	modprobe uio
-	rmmod igb_uio
-	docker exec $TREX_BOX_INST /opt/trex/start/trex_config.sh
-	insmod $ROOTDIR/trex/ko/$(uname -r)/igb_uio.ko
-	docker exec $TREX_BOX_INST sv start trexd
-	show_devices $DOCKER_INST
 }
 
+docker_exec_inst() {
+
+	docker exec $TREX_BOX_INST /bin/bash -c "$@"
+}
+
+show_status() {
+
+	echo
+	echo 'Host devices:'
+	echo '-------------'
+	ip addr
+	docker_exec_inst $TREX_CTL_CMD show_status
+	docker_exec_inst sv status trexd
+}
+
+docker_stop() {
+
+	docker_exec_inst sv stop trexd
+	docker_exec_inst $TREX_CTL_CMD stop
+	show_status
+}
+
+docker_restart() {
+
+	docker_exec_inst $TREX_CTL_CMD stop
+	docker_exec_inst sv start trexd
+	show_status
+}
+
+docker_kill() {
+
+	docker_exec_inst $TREX_CTL_CMD stop
+	$TREX_BOX_CFG_CMD detach_devs
+	show_status
+	docker kill $TREX_BOX_INST
+	docker_cleanup
+}
+
+docker_run() {
+
+	docker_run_inst
+	docker_exec_inst $TREX_CTL_CMD stop
+	local TREX_BOX_INST_PID="$(docker inspect -f '{{.State.Pid}}' $TREX_BOX_INST)"
+	mkdir -p /var/run/netns
+	ln -sf /proc/$TREX_BOX_INST_PID/ns/net "/var/run/netns/$TREX_BOX_INST"
+	$TREX_BOX_CFG_CMD attach_devs
+	docker_exec_inst $TREX_CTL_CMD restart
+	show_status
+}
+
+docker_config() {
+
+	docker build -t $TREX_BOX_IMG ./
+	docker_cleanup
+	docker_run_inst $TREX_CTL_CMD config
+	if [[ "mod_$(lsmod | grep -o '^igb_uio')" == 'mod_igb_uio' ]]
+	then
+		modprobe uio
+		rmmod igb_uio
+		insmod $ROOTDIR/ko/$(uname -r)/igb_uio.ko
+	fi
+	lsmod | grep 'uio'
+	echo
+	echo "$CFG_DIR/${TREX_BOX_INST}-cfg.yaml"
+	cat "$CFG_DIR/${TREX_BOX_INST}-cfg.yaml"
+	echo
+	echo "$CFG_DIR/cfg.json"
+	cat "$CFG_DIR/cfg.json"
+	echo
+}
+
+exit_usage() {
+
+	echo "USAGE: $0 <config|run|stop|restart|kill> <trex-box-id>"
+	echo "EXAMPLE: $0 run 1"
+}
+
+ID_REGEX='^([0-9]|[1-9][0-9]*)$'
+if ! [[ $TREX_BOX_ID =~ $ID_REGEX ]]
+then
+	exit_usage
+elif [[ $ACTION == 'config' ]]
+then
+	docker_kill
+	docker_config
+elif [[ $ACTION == 'run' ]]
+then
+	docker_run
+elif [[ $ACTION == 'stop' ]]
+then
+	docker_stop
+elif [[ $ACTION == 'restart' ]]
+then
+	docker_restart
+elif [[ $ACTION == 'kill' ]]
+then
+	docker_kill
+fi
 
 docker_reset
 
